@@ -8,6 +8,7 @@ import os
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, f1_score
 
+# MLOps Pipeline trigger
 EVAL_THRESHOLD = 0.70
 
 
