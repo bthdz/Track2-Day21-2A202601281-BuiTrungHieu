@@ -13,26 +13,44 @@ MODEL_PATH = os.path.expanduser("~/models/model.pkl")
 
 def download_model():
     """
-    Tai file model.pkl tu GCS ve may khi server khoi dong.
-
-    Ham nay duoc goi mot lan khi module duoc import. Su dung
-    GOOGLE_APPLICATION_CREDENTIALS de xac thuc (duoc dat trong systemd service).
+    Tai file model.pkl tu Cloud Storage (Azure Blob / GCS) ve may khi server khoi dong.
     """
-    gcs_bucket = os.environ.get("GCS_BUCKET")
-    if not gcs_bucket:
-        print("GCS_BUCKET environment variable not set. Skipping download.")
-        return
-
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-    client = storage.Client()
-    bucket = client.bucket(gcs_bucket)
-    blob = bucket.blob(GCS_MODEL_KEY)
-    blob.download_to_filename(MODEL_PATH)
-    print(f"Model da duoc tai xuong tu GCS: gs://{gcs_bucket}/{GCS_MODEL_KEY}")
+
+    azure_conn_str = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
+    azure_container = os.environ.get("AZURE_CONTAINER", os.environ.get("CLOUD_BUCKET"))
+
+    if azure_conn_str and azure_container:
+        try:
+            from azure.storage.blob import BlobServiceClient
+            blob_service_client = BlobServiceClient.from_connection_string(azure_conn_str)
+            blob_client = blob_service_client.get_blob_client(container=azure_container, blob=GCS_MODEL_KEY)
+            with open(MODEL_PATH, "wb") as download_file:
+                download_file.write(blob_client.download_blob().readall())
+            print(f"Model da duoc tai xuong tu Azure Container: {azure_container}/{GCS_MODEL_KEY}")
+            return
+        except Exception as e:
+            print(f"Loi tai model tu Azure: {e}")
+
+    gcs_bucket = os.environ.get("GCS_BUCKET", os.environ.get("CLOUD_BUCKET"))
+    if gcs_bucket:
+        try:
+            from google.cloud import storage
+            client = storage.Client()
+            bucket = client.bucket(gcs_bucket)
+            blob = bucket.blob(GCS_MODEL_KEY)
+            blob.download_to_filename(MODEL_PATH)
+            print(f"Model da duoc tai xuong tu GCS: gs://{gcs_bucket}/{GCS_MODEL_KEY}")
+            return
+        except Exception as e:
+            print(f"Loi tai model tu GCS: {e}")
+
+    print("Cloud credentials not set. Skipping model download.")
 
 
-if os.environ.get("GCS_BUCKET"):
+if os.environ.get("AZURE_STORAGE_CONNECTION_STRING") or os.environ.get("GCS_BUCKET") or os.environ.get("CLOUD_BUCKET"):
     download_model()
+
 
 model = None
 if os.path.exists(MODEL_PATH):

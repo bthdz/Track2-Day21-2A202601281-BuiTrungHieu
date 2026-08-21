@@ -11,7 +11,7 @@ on:
 
 jobs:
 
-  # JOB 1: Chạy unit tests trên dữ liệu ảo (không cần GCS)
+  # JOB 1: Chạy unit tests trên dữ liệu ảo (không cần Cloud Storage)
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -23,7 +23,7 @@ jobs:
           python-version: "3.10"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt azure-storage-blob dvc-azure
 
       - name: Run tests
         run: pytest tests/ -v
@@ -44,10 +44,12 @@ jobs:
           python-version: "3.10"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt azure-storage-blob dvc-azure
 
       - name: Authenticate to Cloud Storage
         run: |
+          echo "AZURE_STORAGE_CONNECTION_STRING=${{ secrets.CLOUD_CREDENTIALS }}" >> $GITHUB_ENV
+          echo "AZURE_CONTAINER=${{ secrets.CLOUD_BUCKET }}" >> $GITHUB_ENV
           echo '${{ secrets.CLOUD_CREDENTIALS }}' > /tmp/sa-key.json
           echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json" >> $GITHUB_ENV
 
@@ -66,17 +68,26 @@ jobs:
         run: |
           python - <<'EOF'
           import os
-          from google.cloud import storage
 
+          azure_conn_str = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
           bucket_name = "${{ secrets.CLOUD_BUCKET }}"
           source_file = "models/model.pkl"
           destination_blob_name = "models/latest/model.pkl"
 
-          client = storage.Client()
-          bucket = client.bucket(bucket_name)
-          blob = bucket.blob(destination_blob_name)
-          blob.upload_from_filename(source_file)
-          print(f"File {source_file} uploaded to gs://{bucket_name}/{destination_blob_name}.")
+          if azure_conn_str and ("DefaultEndpointsProtocol" in azure_conn_str or "AccountName" in azure_conn_str):
+              from azure.storage.blob import BlobServiceClient
+              service_client = BlobServiceClient.from_connection_string(azure_conn_str)
+              blob_client = service_client.get_blob_client(container=bucket_name, blob=destination_blob_name)
+              with open(source_file, "rb") as data:
+                  blob_client.upload_blob(data, overwrite=True)
+              print(f"File {source_file} uploaded to Azure Blob container {bucket_name}/{destination_blob_name}.")
+          else:
+              from google.cloud import storage
+              client = storage.Client()
+              bucket = client.bucket(bucket_name)
+              blob = bucket.blob(destination_blob_name)
+              blob.upload_from_filename(source_file)
+              print(f"File {source_file} uploaded to gs://{bucket_name}/{destination_blob_name}.")
           EOF
 
       - name: Save metrics as artifact
